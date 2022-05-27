@@ -2,7 +2,7 @@
 
 Object.defineProperty(exports, '__esModule', { value: true });
 
-var createjs = require('createjs');
+var createjs = require('createjs-module');
 var ROSLIB = require('roslib');
 
 function _interopNamespace(e) {
