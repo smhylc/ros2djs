@@ -1,7 +1,6 @@
 var ROS2D = (function (exports, createjs, ROSLIB) {
   'use strict';
   
-  var createjs = new createjs();
 
   function _interopNamespace(e) {
     if (e && e.__esModule) return e;
