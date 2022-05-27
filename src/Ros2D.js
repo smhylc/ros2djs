@@ -1,14 +1,10 @@
 import * as createjs from "createjs-module";
 
 var ROS2D = ROS2D || {
-  /**
-   * @default
-   * @description Library version
-   */
-  REVISION : '0.10.0'
+  REVISION : '0.9.0'
 };
 
-
+// convert the given global Stage coordinates to ROS coordinates
 createjs.Stage.prototype.globalToRos = function(x, y) {
   var rosX = (x - this.x) / this.scaleX;
   var rosY = (this.y - y) / this.scaleY;
