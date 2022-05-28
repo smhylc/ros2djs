@@ -1,4 +1,5 @@
 import * as createjs from "createjs-module";
+/*if use frontend framework or spa. include this line and fixed problem! :)  */
 
 /**
  * @author Russell Toris - rctoris@wpi.edu
