@@ -2,7 +2,7 @@
 
 Object.defineProperty(exports, '__esModule', { value: true });
 
-var createjs = require('createjs-module'); // don't install npm-createjs, should install createjs-module 
+var createjs = require('createjs-module'); // don't install npm-createjs -> should install createjs-module 
 var ROSLIB = require('roslib');
 
 function _interopNamespace(e) {
