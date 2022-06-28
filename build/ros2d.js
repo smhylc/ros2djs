@@ -2,7 +2,7 @@ import * as createjs from "createjs-module";
 /*if use frontend framework or spa. include this line and fixed problem! :)  */
 
 /**
- * @author Russell Toris - rctoris@wpi.edu
+ * @author SMHYLC
  */
 
 var ROS2D = ROS2D || {
@@ -1186,4 +1186,210 @@ ROS2D.ZoomView.prototype.zoom = function(zoom) {
 	
 	this.stage.x = this.startShift.x - (this.center.x-this.startShift.x) * (this.stage.scaleX/this.startScale.x - 1);
 	this.stage.y = this.startShift.y - (this.center.y-this.startShift.y) * (this.stage.scaleY/this.startScale.y - 1);
+};
+
+
+ROS2D.SceneNode = function(options) {
+  THREE.Object3D.call(this);
+  options = options || {};
+  var that = this;
+  this.tfClient = options.tfClient;
+  this.frameID = options.frameID;
+  var object = options.object;
+  this.pose = options.pose || new ROSLIB.Pose();
+
+  // Do not render this object until we receive a TF update
+  this.visible = false;
+
+  // add the model
+  this.add(object);
+
+  // set the inital pose
+  this.updatePose(this.pose);
+
+  // save the TF handler so we can remove it later
+  this.tfUpdate = function(msg) {
+
+    // apply the transform
+    var tf = new ROSLIB.Transform(msg);
+    var poseTransformed = new ROSLIB.Pose(that.pose);
+    poseTransformed.applyTransform(tf);
+
+    // update the world
+    that.updatePose(poseTransformed);
+    that.visible = true;
+  };
+
+  // listen for TF updates
+  this.tfClient.subscribe(this.frameID, this.tfUpdate);
+};
+ROS2D.SceneNode.prototype.__proto__ = THREE.Object3D.prototype;
+
+ROS2D.SceneNode.prototype.updatePose = function(pose) {
+  this.position.set( pose.position.x, pose.position.y, pose.position.z );
+  this.quaternion.set(pose.orientation.x, pose.orientation.y,
+      pose.orientation.z, pose.orientation.w);
+  this.updateMatrixWorld(true);
+};
+
+ROS2D.SceneNode.prototype.unsubscribeTf = function() {
+  this.tfClient.unsubscribe(this.frameID, this.tfUpdate);
+};
+
+
+
+
+
+ROS2D.Points = function(options) {
+
+  THREE.Object3D.call(this);
+  options = options || {};
+  this.tfClient = options.tfClient;
+  this.rootObject = options.rootObject || new THREE.Object3D();
+  this.max_pts = options.max_pts || 10000;
+  this.pointRatio = options.pointRatio || 1;
+  this.messageRatio = options.messageRatio || 1;
+  this.messageCount = 0;
+  this.material = options.material || {};
+  this.colorsrc = options.colorsrc;
+  this.colormap = options.colormap;
+
+  if(('color' in options) || ('size' in options) || ('texture' in options)) {
+      console.warn(
+        'toplevel "color", "size" and "texture" options are deprecated.' +
+        'They should beprovided within a "material" option, e.g. : '+
+        ' { tfClient, material : { color: mycolor, size: mysize, map: mytexture }, ... }'
+      );
+  }
+
+  this.sn = null;
+};
+
+ROS2D.Points.prototype.__proto__ = THREE.Object3D.prototype;
+
+ROS2D.Points.prototype.setup = function(frame, point_step, fields)
+{
+    if(this.sn===null){
+        // turn fields to a map
+        fields = fields || [];
+        this.fields = {};
+        for(var i=0; i<fields.length; i++) {
+            this.fields[fields[i].name] = fields[i];
+        }
+        this.geom = new THREE.BufferGeometry();
+
+        this.positions = new THREE.BufferAttribute( new Float32Array( this.max_pts * 3), 3, false );
+        this.geom.addAttribute( 'position', this.positions.setDynamic(true) );
+
+        if(!this.colorsrc && this.fields.rgb) {
+            this.colorsrc = 'rgb';
+        }
+        if(this.colorsrc) {
+            var field = this.fields[this.colorsrc];
+            if (field) {
+                this.colors = new THREE.BufferAttribute( new Float32Array( this.max_pts * 3), 3, false );
+                this.geom.addAttribute( 'color', this.colors.setDynamic(true) );
+                var offset = field.offset;
+                this.getColor = [
+                    function(dv,base,le){return dv.getInt8(base+offset,le);},
+                    function(dv,base,le){return dv.getUint8(base+offset,le);},
+                    function(dv,base,le){return dv.getInt16(base+offset,le);},
+                    function(dv,base,le){return dv.getUint16(base+offset,le);},
+                    function(dv,base,le){return dv.getInt32(base+offset,le);},
+                    function(dv,base,le){return dv.getUint32(base+offset,le);},
+                    function(dv,base,le){return dv.getFloat32(base+offset,le);},
+                    function(dv,base,le){return dv.getFloat64(base+offset,le);}
+                ][field.datatype-1];
+                this.colormap = this.colormap || function(x){return new THREE.Color(x);};
+            } else {
+                console.warn('unavailable field "' + this.colorsrc + '" for coloring.');
+            }
+        }
+
+        if(!this.material.isMaterial) { // if it is an option, apply defaults and pass it to a PointsMaterial
+            if(this.colors && this.material.vertexColors === undefined) {
+                this.material.vertexColors = THREE.VertexColors;
+            }
+            this.material = new THREE.PointsMaterial(this.material);
+        }
+
+        this.object = new THREE.Points( this.geom, this.material );
+
+        this.sn = new ROS2D.SceneNode({
+            frameID : frame,
+            tfClient : this.tfClient,
+            object : this.object
+        });
+
+        this.rootObject.add(this.sn);
+    }
+    return (this.messageCount++ % this.messageRatio) === 0;
+};
+
+ROS2D.Points.prototype.update = function(n)
+{
+  this.geom.setDrawRange(0,n);
+
+  this.positions.needsUpdate = true;
+  this.positions.updateRange.count = n * this.positions.itemSize;
+
+  if (this.colors) {
+    this.colors.needsUpdate = true;
+    this.colors.updateRange.count = n * this.colors.itemSize;
+  }
+};
+
+
+
+
+
+ROS2D.LaserScan = function(options) {
+  options = options || {};
+  this.ros = options.ros;
+  this.topicName = options.topic || '/scan';
+  this.compression = options.compression || 'cbor';
+  this.points = new ROS2D.Points(options);
+  this.rosTopic = undefined;
+  this.subscribe();
+};
+
+ROS2D.LaserScan.prototype.__proto__ = THREE.Object3D.prototype;
+
+
+ROS2D.LaserScan.prototype.unsubscribe = function(){
+  if(this.rosTopic){
+    this.rosTopic.unsubscribe(this.processMessage);
+  }
+};
+
+ROS2D.LaserScan.prototype.subscribe = function(){
+  this.unsubscribe();
+
+  // subscribe to the topic
+  this.rosTopic = new ROSLIB.Topic({
+    ros : this.ros,
+    name : this.topicName,
+    compression : this.compression,
+    queue_length : 1,
+    messageType : 'sensor_msgs/LaserScan'
+  });
+  this.rosTopic.subscribe(this.processMessage.bind(this));
+};
+
+ROS2D.LaserScan.prototype.processMessage = function(message){
+  if(!this.points.setup(message.header.frame_id)) {
+      return;
+  }
+  var n = message.ranges.length;
+  var j = 0;
+  for(var i=0;i<n;i+=this.points.pointRatio){
+    var range = message.ranges[i];
+    if(range >= message.range_min && range <= message.range_max){
+        var angle = message.angle_min + i * message.angle_increment;
+        this.points.positions.array[j++] = range * Math.cos(angle);
+        this.points.positions.array[j++] = range * Math.sin(angle);
+        this.points.positions.array[j++] = 0.0;
+    }
+  }
+  this.points.update(j/3);
 };
